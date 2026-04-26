@@ -352,7 +352,8 @@ class GemDwaNode:
                                             [ 0., 0., 1.]])
 
         # ── Publishers ────────────────────────────────────────
-        self.ackermann_pub = rospy.Publisher('/ackermann_cmd',   AckermannDrive, queue_size=1)
+        # self.ackermann_pub = rospy.Publisher('/ackermann_cmd',   AckermannDrive, queue_size=1)
+        self.ackermann_pub = rospy.Publisher('/dwa_cmd', AckermannDrive, queue_size=1)
         self.map_pub       = rospy.Publisher('/dwa/map_view',    Image,          queue_size=1)
 
         self.ackermann_msg = AckermannDrive()

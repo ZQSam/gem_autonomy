@@ -130,7 +130,8 @@ class YoloDetectorNode:
                 det.bbox.size_y   = y2 - y1
 
                 hyp       = ObjectHypothesisWithPose()
-                hyp.id    = str(int(box.cls[0].item()))
+                # hyp.id    = str(int(box.cls[0].item()))
+                hyp.id    = int(box.cls[0].item())
                 hyp.score = float(box.conf[0].item())
                 det.results.append(hyp)
 
