@@ -29,21 +29,21 @@ objects:
   #   rpy: [0.0, 0.0, 1.57]
   #   static: true  # Keep traffic light static
     
-  # - name: stop_sign
-  #   source: {type: sdf, uri: "model://stop_sign"}  # Use the full SDF model
-  #   xyz: [-26.8, -19.2, 0.0]
-  #   rpy: [0.0, 0.0, 1.57]
-  #   static: true  # Keep stop sign static
+  - name: stop_sign
+    source: {type: sdf, uri: "model://stop_sign"}  # Use the full SDF model
+    xyz: [-10.8, -19.2, 0.0]
+    rpy: [0.0, 0.0, 1.57]
+    static: true  # Keep stop sign static
 
 agents:
-  - name: pedestrian1
-    source: {type: fuel, uri: "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Walking%20Person"}
-    trajectory:
-      - [0.0 , -12.5, -16.2, 0, 0, 0, -1.57]
-      - [6.3 , -12.5, -25.0, 0, 0, 0, -1.57]
-      - [6.8 , -12.5, -25.0, 0, 0, 0,  1.57]
-      - [13.1, -12.5, -16.2, 0, 0, 0,  1.57]
-      - [13.6, -12.5, -16.2, 0, 0, 0, -1.57]
+  # - name: pedestrian1
+  #   source: {type: fuel, uri: "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Walking%20Person"}
+  #   trajectory:
+  #     - [0.0 , -12.5, -16.2, 0, 0, 0, -1.57]
+  #     - [6.3 , -12.5, -25.0, 0, 0, 0, -1.57]
+  #     - [6.8 , -12.5, -25.0, 0, 0, 0,  1.57]
+  #     - [13.1, -12.5, -16.2, 0, 0, 0,  1.57]
+  #     - [13.6, -12.5, -16.2, 0, 0, 0, -1.57]
 
   # - name: bicycle1
   #   motion: rigid                       #tells spawner to use rigid mode

@@ -3,37 +3,59 @@
 import rospy
 from ackermann_msgs.msg import AckermannDrive
 from vision_msgs.msg import Detection2DArray 
+from gazebo_msgs.msg import ModelStates # <--- NEW: The Eye of God
+import math                             # <--- NEW: For speed calculation
 
-class StopSignBehavior:
+class AutonomousMux:
     def __init__(self):
-        rospy.init_node('stop_sign_behavior_node')
+        rospy.init_node('autonomous_mux_node')
         
         rospy.loginfo("========================================")
-        rospy.loginfo("AUTONOMOUS MULTIPLEXER (MUX) INITIALIZED!")
+        rospy.loginfo("V2 MUX: STOP SIGNS & PEDESTRIANS ACTIVE!")
         rospy.loginfo("========================================")
         
-        self.STOP_AREA_THRESHOLD = 5000  
+        # --- Stop Sign Config ---
+        self.STOP_AREA_THRESHOLD = 6000  
         self.STOP_DURATION = 3.0          
-        self.COOLDOWN_DURATION = 10.0     
+        self.COOLDOWN_DURATION = 25.0     
         
-        self.state = "DRIVING"
-        self.state_start_time = 0.0
+        # --- Pedestrian Config ---
+        self.PED_AREA_THRESHOLD = 1500     # How close they need to be to care
+        self.PED_PATIENCE_TIME = 1.0       # How long to wait after YOLO loses them
+        # Camera is 320 wide. Center is 160. Strike zone is middle 50%.
+        self.STRIKE_ZONE_LEFT = 32.0       
+        self.STRIKE_ZONE_RIGHT = 288.0     
 
-        # 1. Listen to YOLO
+        # --- State Tracking ---
+        self.state = "DRIVING" # Can be: DRIVING, STOPPING, COOLDOWN, YIELDING
+        self.state_start_time = 0.0
+        self.last_pedestrian_time = 0.0    # Tracks the exact moment we last saw a person
+        self.current_speed = 1.5
+
+        rospy.Subscriber('/gazebo/model_states', ModelStates, self.model_states_callback) # <--- NEW: The Eye of God
+
         rospy.Subscriber('/yolo/detections', Detection2DArray, self.yolo_callback)
-        
-        # 2. Listen to DWA (The remapped private channel)
         rospy.Subscriber('/dwa_cmd', AckermannDrive, self.dwa_callback)
-        
-        # 3. The ONLY node allowed to talk to the car's wheels
         self.cmd_pub = rospy.Publisher('/ackermann_cmd', AckermannDrive, queue_size=10)
         
-        self.rate = rospy.Rate(50)
+        self.rate = rospy.Rate(100)
+
+    def model_states_callback(self, msg):
+        try:
+            # Search the simulation for the vehicle (usually named 'gem')
+            for i, name in enumerate(msg.name):
+                if "gem" in name:
+                    # Get the raw X and Y velocities
+                    vx = msg.twist[i].linear.x
+                    vy = msg.twist[i].linear.y
+                    
+                    # Calculate absolute forward speed (always positive)
+                    self.current_speed = math.hypot(vx, vy)
+                    break
+        except Exception:
+            pass
 
     def yolo_callback(self, msg):
-        if self.state != "DRIVING":
-            return
-
         if len(msg.detections) == 0:
             return 
 
@@ -41,15 +63,38 @@ class StopSignBehavior:
             if len(det.results) > 0:
                 detected_id = int(det.results[0].id)
                 area = det.bbox.size_x * det.bbox.size_y
+                center_x = det.bbox.center.x
                 
-                if detected_id == 11 and area > self.STOP_AREA_THRESHOLD:
-                    rospy.logwarn(f"*** STOP SIGN CLOSE! Area: {area:.2f}. SEVERING DWA CONTROL! ***")
-                    self.state = "STOPPING"
-                    self.state_start_time = rospy.get_time()
-                    return 
+                # ---------------------------------------------------
+                # PRIORITY 1: PEDESTRIANS (Supreme Override)
+                # We care about humans EVEN IF we are in a Stop Sign Cooldown!
+                # ---------------------------------------------------
+                if detected_id == 0 and area > self.PED_AREA_THRESHOLD:
+                    if self.STRIKE_ZONE_LEFT < center_x < self.STRIKE_ZONE_RIGHT:
+                        # Reset the patience timer
+                        self.last_pedestrian_time = rospy.get_time()
+                        
+                        # Instantly override any other state (DRIVING or COOLDOWN)
+                        if self.state != "YIELDING":
+                            rospy.logwarn(f"*** PEDESTRIAN IN ROAD! Severing DWA! ***")
+                            self.state = "YIELDING"
+                        
+                        # Skip reading any other objects (like signs) until the human is safe
+                        return 
+
+                # ---------------------------------------------------
+                # PRIORITY 2: STOP SIGNS (Low Priority)
+                # ---------------------------------------------------
+                elif detected_id == 11 and area > self.STOP_AREA_THRESHOLD:
+                    # ONLY trigger a stop sign if we are in normal DRIVING mode.
+                    # If we are in COOLDOWN, we ignore it.
+                    if self.state == "DRIVING": 
+                        rospy.logwarn(f"*** STOP SIGN! Area: {area:.2f}. BRAKING! ***")
+                        self.state = "STOPPING"
+                        self.state_start_time = rospy.get_time()
 
     def dwa_callback(self, msg):
-        # MUX LOGIC: If we are not stopping, forward DWA's driving commands directly to the car
+        # MUX LOGIC: Only pass DWA commands if it is perfectly safe
         if self.state == "DRIVING" or self.state == "COOLDOWN":
             self.cmd_pub.publish(msg)
 
@@ -58,33 +103,62 @@ class StopSignBehavior:
         while not rospy.is_shutdown():
             current_time = rospy.get_time()
 
+            # --- STOP SIGN EXECUTION ---
             if self.state == "STOPPING":
-                elapsed_time = current_time - self.state_start_time
-                if elapsed_time >= self.STOP_DURATION:
-                    rospy.loginfo("Done stopping. Reconnecting DWA control. Entering cooldown...")
-                    self.state = "COOLDOWN"
+                # Check if we are physically stopped (velocity near 0)
+                if abs(self.current_speed) > 0.1:
+                    # CLOSED-LOOP: Still rolling! Keep resetting the clock so the 3s timer never starts.
                     self.state_start_time = current_time
+                    rospy.loginfo_throttle(0.5, f"[BRAKING] Slowing down... Speed: {self.current_speed:.2f} m/s")
+                    self.slam_brakes()
                 else:
-                    rospy.loginfo_throttle(0.5, f"[BRAKING] Holding brakes... {elapsed_time:.1f} / {self.STOP_DURATION} sec")
-                    
-                    stop_cmd = AckermannDrive()
-                    stop_cmd.speed = 0.0
-                    stop_cmd.steering_angle = 0.0
-                    stop_cmd.acceleration = -10.0  # <--- NEW: Aggressive physical braking force!
-                    stop_cmd.jerk = -10.0          # <--- NEW: Apply it instantly!
-                    self.cmd_pub.publish(stop_cmd)
+                    # WE HAVE FULLY STOPPED. NOW we start the 3-second countdown.
+                    elapsed_time = current_time - self.state_start_time
+                    if elapsed_time >= self.STOP_DURATION:
+                        rospy.loginfo("Done stopping for sign. Entering cooldown...")
+                        self.state = "COOLDOWN"
+                        self.state_start_time = current_time
+                    else:
+                        rospy.loginfo_throttle(0.5, f"[BRAKING] Fully stopped! Holding... {elapsed_time:.1f} / {self.STOP_DURATION} sec")
+                        self.slam_brakes()
 
+            # --- STOP SIGN COOLDOWN ---
             elif self.state == "COOLDOWN":
                 elapsed_cooldown = current_time - self.state_start_time
                 if elapsed_cooldown >= self.COOLDOWN_DURATION:
-                    rospy.loginfo("Cooldown complete. Looking for stop signs again.")
+                    rospy.loginfo("Cooldown complete.")
                     self.state = "DRIVING"
+
+            # --- PEDESTRIAN EXECUTION ---
+            elif self.state == "YIELDING":
+                time_since_last_seen = current_time - self.last_pedestrian_time
+                
+                # The Patience Timer: Have they been gone for a full second?
+                if time_since_last_seen > self.PED_PATIENCE_TIME:
+                    rospy.loginfo("Pedestrian cleared the road. Resuming DWA...")
+                    self.state = "DRIVING"
+                else:
+                    rospy.loginfo_throttle(0.5, "[YIELDING] Waiting for pedestrian to cross...")
+                    self.slam_brakes()
 
             self.rate.sleep()
 
+    def slam_brakes(self):
+        stop_cmd = AckermannDrive()
+        stop_cmd.steering_angle = 0.0
+        
+        if self.current_speed > 0.15:
+            # We are rolling forward. Hit the brakes!
+            stop_cmd.speed = -4.0  
+        else:
+            # We hit 0.0 m/s. INSTANTLY let off the brakes to prevent going into reverse!
+            stop_cmd.speed = 0.0   
+            
+        self.cmd_pub.publish(stop_cmd)
+
 if __name__ == '__main__':
     try:
-        node = StopSignBehavior()
+        node = AutonomousMux()
         node.run()
     except rospy.ROSInterruptException:
         pass
