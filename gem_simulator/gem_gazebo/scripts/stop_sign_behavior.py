@@ -20,11 +20,11 @@ class AutonomousMux:
         self.COOLDOWN_DURATION = 25.0     
         
         # --- Pedestrian Config ---
-        self.PED_AREA_THRESHOLD = 1500     # How close they need to be to care
-        self.PED_PATIENCE_TIME = 1.0       # How long to wait after YOLO loses them
-        # Camera is 320 wide. Center is 160. Strike zone is middle 50%.
-        self.STRIKE_ZONE_LEFT = 32.0       
-        self.STRIKE_ZONE_RIGHT = 288.0     
+        self.PED_AREA_THRESHOLD = 300      
+        self.PED_PATIENCE_TIME = 3.0
+
+        self.STRIKE_ZONE_LEFT = 300.0       
+        self.STRIKE_ZONE_RIGHT = 980.0
 
         # --- State Tracking ---
         self.state = "DRIVING" # Can be: DRIVING, STOPPING, COOLDOWN, YIELDING
@@ -64,6 +64,8 @@ class AutonomousMux:
                 detected_id = int(det.results[0].id)
                 area = det.bbox.size_x * det.bbox.size_y
                 center_x = det.bbox.center.x
+
+                # rospy.loginfo_throttle(0.5, f"[VISION DEBUG] ID: {detected_id} | Area: {area:.1f} | X: {center_x:.1f}")
                 
                 # ---------------------------------------------------
                 # PRIORITY 1: PEDESTRIANS (Supreme Override)
