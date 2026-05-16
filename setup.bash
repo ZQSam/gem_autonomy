@@ -15,7 +15,7 @@ rosservice call /gazebo/reset_world
 
 # stop sign testing
 roslaunch gem_launch gem_init.launch world_name:="highbay_track.world" x:=12.5 y:=-21 yaw:=3.1416 custom_scene:=true
-roslaunch gem_dwa_sim dwa_sim.launch goal.x:=-20.0 yaml_path:=$(rospack find gem_gazebo)/scenes/highbay_track.yaml
+# roslaunch gem_dwa_sim dwa_sim.launch goal.x:=-20.0 yaml_path:=$(rospack find gem_gazebo)/scenes/highbay_track.yaml
 rostopic pub -r 20 /dwa_cmd ackermann_msgs/AckermannDrive "{speed: 1.5, steering_angle: 0.0}"
 roslaunch gem_gazebo yolo_detector.launch
 rosrun gem_gazebo stop_sign_behavior.py
